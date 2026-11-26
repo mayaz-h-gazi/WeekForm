@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#173d33">
+  <meta name="description" content="A calm, flexible weekly class routine planner for every semester.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Weekform — Semester routine planner">
+  <meta property="og:description" content="Plan course credits, class days, and every weekly session with a flexible routine planner for any university.">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <title>Weekform — Semester routine planner</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Weekform home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 36 36" fill="none"><rect x="3" y="3" width="30" height="30" rx="10" fill="currentColor"/><path d="M11 18.5h14M18 11.5v14" stroke="#173D33" stroke-width="2.4" stroke-linecap="round"/><circle cx="18" cy="18.5" r="8" stroke="#D9F083" stroke-width="1.6"/></svg>
+      </span>
+      <span class="brand-name">weekform<span class="brand-period">.</span></span>
+    </a>
+    <div class="topbar-right">
+      <label class="semester-picker">
+        <span class="sr-only">Active semester</span>
+        <select id="semester-select" aria-label="Choose semester"></select>
+        <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg>
+      </label>
+      <button class="button button-light button-small" id="new-semester-button" type="button">
+        <span aria-hidden="true">＋</span> New semester
+      </button>
+    </div>
+  </header>
+
+  <main class="app-layout">
+    <aside class="sidebar">
+      <section class="credit-card" aria-labelledby="credit-card-title">
+        <div class="card-overline">
+          <span class="overline-dot"></span>
+          <span id="credit-card-title">SEMESTER LOAD</span>
+        </div>
+        <div class="credit-total-row">
+          <strong id="credit-total">0</strong>
+          <span>credits</span>
+        </div>
+        <p class="credit-target" id="credit-target">Target: 12–15 credits</p>
+        <div class="meter-track" role="progressbar" aria-label="Credits toward maximum target" aria-valuemin="0" aria-valuemax="15" aria-valuenow="0">
+          <span id="credit-meter"></span>
+        </div>
+        <div class="meter-labels"><span>0</span><span id="meter-max">15 credits</span></div>
+        <div class="load-status" id="load-status" aria-live="polite"></div>
+      </section>
+
+      <section class="quick-stats" aria-label="Routine summary">
+        <div class="quick-stat">
+          <span class="stat-icon stat-icon-sage" aria-hidden="true">▦</span>
+          <span class="stat-copy"><strong id="course-count">0</strong><small>courses</small></span>
+        </div>
+        <div class="quick-stat">
+          <span class="stat-icon stat-icon-peach" aria-hidden="true">◷</span>
+          <span class="stat-copy"><strong id="meeting-count">0</strong><small>weekly meetings</small></span>
+        </div>
+      </section>
+
+      <section class="sidebar-note">
+        <div class="note-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5a7 7 0 0 0-4.4 12.45c.9.73 1.4 1.64 1.4 2.55h6c0-.91.5-1.82 1.4-2.55A7 7 0 0 0 12 3.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9.5 21h5M9.7 18.5h4.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </div>
+        <p class="note-title">Make room for real life</p>
+        <p class="note-copy">Add every class pattern, then use the week view to see how your semester fits together.</p>
+      </section>
+
+      <div class="sidebar-footer">
+        <span class="storage-indicator" aria-hidden="true"></span>
+        Saved on this device · Nothing uploaded
+      </div>
+    </aside>
+
+    <section class="main-panel">
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow" id="semester-eyebrow">YOUR SEMESTER</p>
+          <h1>Build a week that works.</h1>
+          <p class="page-subtitle">A flexible routine planner for any university. Your plan stays in this browser.</p>
+        </div>
+        <button class="button button-primary" id="add-course-button" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
+          Add a course
+        </button>
+      </div>
+
+      <div id="global-message" class="global-message" role="status" hidden></div>
+
+      <nav class="tabs" aria-label="Semester planning views">
+        <button class="tab-button active" type="button" data-tab="schedule" aria-current="page">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.7" y="3.5" width="14.6" height="13.8" rx="2"/><path d="M6.5 2.5v3M13.5 2.5v3M3 7.5h14"/></svg>
+          Weekly schedule
+        </button>
+        <button class="tab-button" type="button" data-tab="courses">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.2h9.2l2.8 2.7v10.9H4z"/><path d="M13 3.5v3h3M7 10h6M7 13h6"/></svg>
+          Courses <span class="tab-count" id="course-tab-count">0</span>
+        </button>
+        <button class="tab-button" type="button" data-tab="general">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4"/><circle cx="10" cy="10" r="4"/></svg>
+          General
+        </button>
+      </nav>
+
+      <div id="view-content" class="view-content"></div>
+      <footer class="site-footer">Independent student tool · Confirm final timings with your university.</footer>
+    </section>
+  </main>
+
+  <dialog id="course-dialog" class="modal">
+    <form id="course-form" method="dialog">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">COURSE DETAILS</p>
+          <h2 id="course-dialog-title">Add a course</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close dialog">×</button>
+      </div>
+      <div id="course-form-content"></div>
+      <div id="draft-status" class="draft-status" role="status" aria-live="polite"></div>
+      <div class="modal-actions">
+        <button class="button button-quiet" type="button" data-close-dialog>Cancel</button>
+        <button class="button button-primary" id="save-course-button" type="submit">Save course</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="semester-dialog" class="modal modal-compact">
+    <form id="semester-form" method="dialog">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">NEW TERM</p>
+          <h2>Start a semester</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-semester aria-label="Close dialog">×</button>
+      </div>
+      <p class="modal-intro">Give this routine a name. You can set its credit range in General.</p>
+      <label class="field-label" for="new-semester-name">Semester name</label>
+      <input class="text-input" id="new-semester-name" name="semesterName" maxlength="60" placeholder="e.g. Fall 2027" required>
+      <div class="modal-actions">
+        <button class="button button-quiet" type="button" data-close-semester>Cancel</button>
+        <button class="button button-primary" type="submit">Create semester</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
+
