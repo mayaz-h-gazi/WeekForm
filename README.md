@@ -11,10 +11,11 @@ A browser-based semester routine planner. Open `index.html` in a modern browser;
 - Gives each component its own credit value and one or more weekly meetings, with independently selected days and start/end hour, minute, and AM/PM values. No class times are prefilled.
 - Checks meeting overlaps across every day and component. A course with a timing conflict cannot be saved until the schedule is adjusted.
 - Shows the saved weekly routine in a scrollable Sunday–Saturday calendar whose time range follows the meetings you enter.
+- Downloads the selected semester as an Excel workbook with a filterable schedule detail tab and a color-coded weekly routine grid.
 
 Plans are stored in this browser's local storage on this device. Clearing browser storage removes them.
 
-The site has no account or server component: course plans remain in the visitor's browser and are not uploaded. It is an independent student tool; users should confirm final class times with their university.
+The site has no account or server component: course plans remain in the visitor's browser and are not uploaded. Excel export is also generated in the browser. It loads the ExcelJS browser library from jsDelivr when first used. It is an independent student tool; users should confirm final class times with their university.
 
 ## Publish with GitHub Pages
 

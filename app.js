@@ -20,6 +20,15 @@
     { key: "hsci", label: "Health Science", short: "H Sci", css: "type-hsci" }
   ];
   const HOUR_HEIGHT = 60;
+  let excelJsPromise = null;
+  const EXCEL_TYPE_STYLES = {
+    lec: { fill: "FFEAF4E7", font: "FF295D49", border: "FFB9D5B8", swatch: "FF91B89B" },
+    com: { fill: "FFE9F1FB", font: "FF365D83", border: "FFB9CBE0", swatch: "FF8BA9C8" },
+    sci: { fill: "FFFBF1DF", font: "FF866041", border: "FFE7D1A5", swatch: "FFD1AF70" },
+    lan: { fill: "FFF5EAFA", font: "FF784F7D", border: "FFD9C1E1", swatch: "FFBA92C7" },
+    stu: { fill: "FFFFF0E9", font: "FFA35E45", border: "FFE9C6B4", swatch: "FFD79578" },
+    hsci: { fill: "FFE6F3F2", font: "FF3E6C71", border: "FFB4D7D4", swatch: "FF7BB2AE" }
+  };
   const app = {
     store: null,
     tab: "schedule",
@@ -148,6 +157,10 @@
 
   function conflictKey(courseId, meetingId) {
     return String(courseId) + "::" + String(meetingId);
+  }
+
+  function conflictDayKey(courseId, meetingId, dayKey) {
+    return conflictKey(courseId, meetingId) + "::" + String(dayKey);
   }
 
   function conflictMap(conflicts) {
@@ -289,7 +302,8 @@
     const badMeetings = conflictMap(conflicts);
     const meetings = allMeetings(semester);
     const top = '<div class="view-heading"><div><h2>Your weekly rhythm</h2><p>Every saved meeting appears here. Scroll sideways to see the full week.</p></div>' +
-      '<span class="week-caption"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.7"/><path d="M8 4.5V8l2.4 1.5"/></svg> Weekly view</span></div>';
+      '<div class="schedule-heading-actions"><span class="week-caption"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.7"/><path d="M8 4.5V8l2.4 1.5"/></svg> Weekly view</span>' +
+      '<button class="small-button" type="button" data-export-excel>Download Excel</button></div></div>';
     if (!semester.courses.length) {
       $("#view-content").innerHTML = top + '<div class="empty-state"><div class="empty-illustration"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2.5"/><path d="M7.5 2.8v3M16.5 2.8v3M3.5 8.5h17M8 12h2M14 12h2M8 16h2"/></svg></div><h3>Your week is open.</h3><p>Add your first course, then build its credit components and meeting times one by one.</p><button class="button button-primary" type="button" data-add-course>Start with a course</button></div>';
       return;
@@ -354,6 +368,376 @@
     return '<div class="calendar-card"><div class="calendar-viewport"><div class="calendar">' + header +
       '<div class="calendar-body"><div class="time-rail" style="height:' + height + 'px">' + timeLabels + '</div>' + columns + '</div></div></div>' +
       '<div class="schedule-legend">' + legend + '</div></div>';
+  }
+
+  function loadExcelJs() {
+    if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+    if (excelJsPromise) return excelJsPromise;
+    excelJsPromise = new Promise(function (resolve, reject) {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+      script.async = true;
+      script.onload = function () {
+        if (window.ExcelJS) resolve(window.ExcelJS);
+        else {
+          excelJsPromise = null;
+          script.remove();
+          reject(new Error("Excel library did not load."));
+        }
+      };
+      script.onerror = function () {
+        script.remove();
+        excelJsPromise = null;
+        reject(new Error("Excel library could not be downloaded."));
+      };
+      document.head.appendChild(script);
+    });
+    return excelJsPromise;
+  }
+
+  function workbookRows(semester) {
+    const rows = [];
+    semester.courses.forEach(function (course) {
+      (course.components || []).forEach(function (component) {
+        const type = typeInfo(component.type);
+        const credits = Number(component.credits) || 0;
+        const scheduledRows = [];
+        (component.meetings || []).forEach(function (meeting) {
+          const start = toMinutes(meeting && meeting.start);
+          const end = toMinutes(meeting && meeting.end);
+          const meetingDays = DAYS.filter(function (day) {
+            return meeting && Array.isArray(meeting.days) && meeting.days.indexOf(day.key) >= 0;
+          });
+          if (!meetingDays.length || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+          meetingDays.forEach(function (day) {
+            scheduledRows.push({
+              course: course,
+              component: component,
+              componentType: type,
+              credits: credits,
+              day: day.long,
+              dayKey: day.key,
+              start: meeting.start,
+              end: meeting.end,
+              meetingId: meeting.id
+            });
+          });
+        });
+
+        if (!scheduledRows.length) {
+          rows.push({
+            course: course,
+            component: component,
+            componentType: type,
+            credits: credits,
+            day: "No meeting time",
+            dayKey: "",
+            start: "",
+            end: "",
+            meetingId: ""
+          });
+          return;
+        }
+
+        scheduledRows.forEach(function (entry, index) {
+          if (index > 0) entry.credits = null;
+          rows.push(entry);
+        });
+      });
+    });
+    return rows;
+  }
+
+  function excelFileName(name) {
+    const safeName = String(name || "semester")
+      .trim()
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-");
+    return "Weekform-" + (safeName || "semester") + ".xlsx";
+  }
+
+  function setExcelCellFill(cell, color) {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: color } };
+  }
+
+  function addScheduleDataSheet(workbook, semester, scheduleRows, conflictedMeetingDays) {
+    const sheet = workbook.addWorksheet("Schedule Data");
+    const headers = ["Class ID", "Course Code", "Course Title", "Section", "Type", "Credits", "Day", "Start Time", "End Time", "Room", "Conflict Check"];
+    const widths = [15, 16, 34, 12, 24, 12, 18, 15, 15, 14, 18];
+    sheet.columns = widths.map(function (width) { return { width: width }; });
+    sheet.views = [{ state: "frozen", ySplit: 4 }];
+    sheet.properties.defaultRowHeight = 22;
+
+    sheet.mergeCells(1, 1, 1, headers.length);
+    const title = sheet.getCell(1, 1);
+    title.value = semester.name + " · Schedule Data";
+    title.font = { name: "Arial", size: 15, bold: true, color: { argb: "FFFFFFFF" } };
+    title.alignment = { vertical: "middle", horizontal: "left" };
+    setExcelCellFill(title, "FF173D33");
+    sheet.getRow(1).height = 30;
+
+    const meetingCount = allMeetings(semester).length;
+    sheet.mergeCells(2, 1, 2, headers.length);
+    const summary = sheet.getCell(2, 1);
+    summary.value = "Total credits: " + formatCredit(totalCredits(semester)) +
+      "  |  Credit range: " + formatCredit(semester.minCredits) + "–" + formatCredit(semester.maxCredits) +
+      "  |  Courses: " + semester.courses.length + "  |  Weekly meeting patterns: " + meetingCount;
+    summary.font = { name: "Arial", size: 10, color: { argb: "FF46564D" } };
+    summary.alignment = { vertical: "middle", horizontal: "left" };
+    sheet.getRow(2).height = 23;
+
+    sheet.mergeCells(3, 1, 3, headers.length);
+    const note = sheet.getCell(3, 1);
+    note.value = "Each component's credits appear once to avoid double counting. Class ID, Section, and Room are blank for optional entry.";
+    note.font = { name: "Arial", size: 9, italic: true, color: { argb: "FF68766D" } };
+    note.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+    sheet.getRow(3).height = 24;
+
+    headers.forEach(function (header, index) {
+      const cell = sheet.getCell(4, index + 1);
+      cell.value = header;
+      cell.font = { name: "Arial", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      setExcelCellFill(cell, "FF1F2937");
+      cell.border = { bottom: { style: "thin", color: { argb: "FFFFFFFF" } } };
+    });
+    sheet.getRow(4).height = 30;
+
+    if (!scheduleRows.length) {
+      sheet.mergeCells(5, 1, 5, headers.length);
+      sheet.getCell(5, 1).value = "No courses added yet.";
+      sheet.getCell(5, 1).font = { name: "Arial", size: 10, italic: true, color: { argb: "FF68766D" } };
+      sheet.getCell(5, 1).alignment = { vertical: "middle", horizontal: "left" };
+      sheet.getRow(5).height = 24;
+      return sheet;
+    }
+
+    const lastDataRow = 4 + scheduleRows.length;
+    scheduleRows.forEach(function (entry, index) {
+      const rowNumber = index + 5;
+      const courseName = entry.course.name || "Untitled course";
+      const values = [
+        "",
+        entry.course.code || "",
+        courseName,
+        "",
+        entry.componentType.label + " / " + entry.componentType.short,
+        entry.credits,
+        entry.day,
+        entry.start ? toMinutes(entry.start) / 1440 : null,
+        entry.end ? toMinutes(entry.end) / 1440 : null,
+        "",
+        ""
+      ];
+      const row = sheet.addRow(values);
+      const shade = index % 2 === 0 ? "FFFFFFFF" : "FFF7F9F6";
+      row.height = 24;
+      row.eachCell({ includeEmpty: true }, function (cell) {
+        setExcelCellFill(cell, shade);
+        cell.font = { name: "Arial", size: 10, color: { argb: "FF26352D" } };
+        cell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+        cell.border = { bottom: { style: "thin", color: { argb: "FFE6EAE5" } } };
+      });
+      row.getCell(6).numFmt = "0.##";
+      row.getCell(8).numFmt = "h:mm AM/PM";
+      row.getCell(9).numFmt = "h:mm AM/PM";
+      row.getCell(7).alignment = { vertical: "middle", horizontal: "center" };
+
+      if (entry.dayKey && entry.start && entry.end) {
+        const overlap = conflictedMeetingDays.has(conflictDayKey(entry.course.id, entry.meetingId, entry.dayKey));
+        const formula = "IF(COUNTIFS($G$5:$G$" + lastDataRow + ",G" + rowNumber + ",$H$5:$H$" + lastDataRow + ",\"<\"&I" + rowNumber + ",$I$5:$I$" + lastDataRow + ",\">\"&H" + rowNumber + ")>1,\"Overlap\",\"OK\")";
+        row.getCell(11).value = { formula: formula, result: overlap ? "Overlap" : "OK" };
+        row.getCell(11).alignment = { vertical: "middle", horizontal: "center" };
+        if (overlap) {
+          row.getCell(11).font = { name: "Arial", size: 10, bold: true, color: { argb: "FFB45742" } };
+          setExcelCellFill(row.getCell(11), "FFFFF0EB");
+        }
+      } else {
+        row.getCell(11).value = "No class time";
+        row.getCell(11).alignment = { vertical: "middle", horizontal: "center" };
+      }
+    });
+
+    sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: lastDataRow, column: headers.length } };
+    return sheet;
+  }
+
+  function addWeeklyChartSheet(workbook, semester, conflictedMeetings) {
+    const sheet = workbook.addWorksheet("Weekly Routine Chart");
+    const columns = ["Time"].concat(DAYS.map(function (day) { return day.long; }));
+    sheet.columns = [{ width: 22 }].concat(DAYS.map(function () { return { width: 21 }; }));
+    sheet.views = [{ state: "frozen", ySplit: 3 }];
+    sheet.properties.defaultRowHeight = 24;
+    sheet.mergeCells(1, 1, 1, columns.length);
+    const title = sheet.getCell(1, 1);
+    title.value = semester.name + " · Weekly Routine Chart";
+    title.font = { name: "Arial", size: 15, bold: true, color: { argb: "FFFFFFFF" } };
+    title.alignment = { vertical: "middle", horizontal: "left" };
+    setExcelCellFill(title, "FF173D33");
+    sheet.getRow(1).height = 30;
+
+    sheet.mergeCells(2, 1, 2, columns.length);
+    const summary = sheet.getCell(2, 1);
+    summary.value = "Total credits: " + formatCredit(totalCredits(semester)) +
+      "  |  Credit range: " + formatCredit(semester.minCredits) + "–" + formatCredit(semester.maxCredits);
+    summary.font = { name: "Arial", size: 10, color: { argb: "FF46564D" } };
+    summary.alignment = { vertical: "middle", horizontal: "left" };
+    sheet.getRow(2).height = 23;
+
+    columns.forEach(function (label, index) {
+      const cell = sheet.getCell(3, index + 1);
+      cell.value = label;
+      cell.font = { name: "Arial", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+      setExcelCellFill(cell, "FF1F2937");
+      cell.border = { bottom: { style: "thin", color: { argb: "FFFFFFFF" } } };
+    });
+    sheet.getRow(3).height = 27;
+
+    const meetings = allMeetings(semester);
+    if (!meetings.length) {
+      sheet.mergeCells(4, 1, 4, columns.length);
+      sheet.getCell(4, 1).value = "Add class days and times in Weekform to populate this weekly view.";
+      sheet.getCell(4, 1).font = { name: "Arial", size: 10, italic: true, color: { argb: "FF68766D" } };
+      sheet.getCell(4, 1).alignment = { vertical: "middle", horizontal: "left" };
+      sheet.getRow(4).height = 26;
+      return sheet;
+    }
+
+    const boundaryValues = [];
+    meetings.forEach(function (meeting) {
+      boundaryValues.push(toMinutes(meeting.start), toMinutes(meeting.end));
+    });
+    const boundaries = Array.from(new Set(boundaryValues)).sort(function (a, b) { return a - b; });
+    const segments = [];
+    for (let index = 0; index < boundaries.length - 1; index += 1) {
+      if (boundaries[index + 1] > boundaries[index]) {
+        segments.push({ start: boundaries[index], end: boundaries[index + 1] });
+      }
+    }
+    const boundaryIndex = new Map();
+    boundaries.forEach(function (value, index) { boundaryIndex.set(value, index); });
+    const firstSegmentRow = 4;
+
+    segments.forEach(function (segment, index) {
+      const rowNumber = firstSegmentRow + index;
+      const row = sheet.getRow(rowNumber);
+      row.height = Math.max(26, Math.min(44, 18 + ((segment.end - segment.start) / 60) * 12));
+      row.getCell(1).value = formatTime(String(Math.floor(segment.start / 60)).padStart(2, "0") + ":" + String(segment.start % 60).padStart(2, "0")) +
+        " – " + formatTime(String(Math.floor(segment.end / 60)).padStart(2, "0") + ":" + String(segment.end % 60).padStart(2, "0"));
+      row.getCell(1).font = { name: "Arial", size: 9, color: { argb: "FF26352D" } };
+      row.getCell(1).alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      row.getCell(1).border = { bottom: { style: "thin", color: { argb: "FFE6EAE5" } } };
+
+      const activeMeetings = meetings.filter(function (meeting) {
+        return toMinutes(meeting.start) <= segment.start && toMinutes(meeting.end) >= segment.end;
+      });
+      for (let dayIndex = 0; dayIndex < DAYS.length; dayIndex += 1) {
+        const day = DAYS[dayIndex];
+        const cell = row.getCell(dayIndex + 2);
+        const event = activeMeetings.find(function (meeting) { return meeting.days.indexOf(day.key) >= 0; });
+        setExcelCellFill(cell, event ? "FFFFFFFF" : (activeMeetings.length ? "FFFFFFFF" : "FFF2F2F2"));
+        cell.border = { bottom: { style: "thin", color: { argb: "FFE6EAE5" } }, left: { style: "thin", color: { argb: "FFE6EAE5" } } };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      }
+    });
+
+    meetings.forEach(function (meeting) {
+      const startIndex = boundaryIndex.get(toMinutes(meeting.start));
+      const endIndex = boundaryIndex.get(toMinutes(meeting.end));
+      if (startIndex == null || endIndex == null || endIndex <= startIndex) return;
+      const startRow = firstSegmentRow + startIndex;
+      const endRow = firstSegmentRow + endIndex - 1;
+      const dayColumns = DAYS.filter(function (day) { return meeting.days.indexOf(day.key) >= 0; });
+      const type = typeInfo(meeting.componentType);
+      const typeStyle = EXCEL_TYPE_STYLES[type.key] || EXCEL_TYPE_STYLES.lec;
+      const courseLabel = meeting.courseCode ? meeting.courseCode + " · " + meeting.courseName : meeting.courseName;
+      const text = courseLabel + "\n" + type.short + " · " + formatTime(meeting.start) + "–" + formatTime(meeting.end);
+      const isConflict = conflictedMeetings.has(conflictKey(meeting.courseId, meeting.meetingId));
+
+      dayColumns.forEach(function (day) {
+        const columnNumber = DAYS.indexOf(day) + 2;
+        if (endRow > startRow) sheet.mergeCells(startRow, columnNumber, endRow, columnNumber);
+        const cell = sheet.getCell(startRow, columnNumber);
+        cell.value = text;
+        setExcelCellFill(cell, isConflict ? "FFFFF0EB" : typeStyle.fill);
+        cell.font = { name: "Arial", size: 9, bold: true, color: { argb: isConflict ? "FF783B2D" : typeStyle.font } };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        cell.border = {
+          top: { style: "thin", color: { argb: isConflict ? "FFDC775C" : typeStyle.border } },
+          bottom: { style: "thin", color: { argb: isConflict ? "FFDC775C" : typeStyle.border } },
+          left: { style: "thin", color: { argb: isConflict ? "FFDC775C" : typeStyle.border } },
+          right: { style: "thin", color: { argb: isConflict ? "FFDC775C" : typeStyle.border } }
+        };
+      });
+    });
+
+    const finalTimeRow = firstSegmentRow + segments.length - 1;
+    const legendTitleRow = finalTimeRow + 2;
+    sheet.getCell(legendTitleRow, 1).value = "Component type legend";
+    sheet.getCell(legendTitleRow, 1).font = { name: "Arial", size: 10, bold: true, color: { argb: "FF26352D" } };
+    TYPES.forEach(function (type, index) {
+      const legendRow = legendTitleRow + 1 + Math.floor(index / 4);
+      const labelColumn = 1 + (index % 4) * 2;
+      const typeStyle = EXCEL_TYPE_STYLES[type.key] || EXCEL_TYPE_STYLES.lec;
+      const labelCell = sheet.getCell(legendRow, labelColumn);
+      labelCell.value = type.label + " / " + type.short;
+      labelCell.font = { name: "Arial", size: 9, color: { argb: "FF46564D" } };
+      labelCell.alignment = { vertical: "middle", horizontal: "left" };
+      const swatch = sheet.getCell(legendRow, labelColumn + 1);
+      setExcelCellFill(swatch, typeStyle.swatch);
+      swatch.border = { bottom: { style: "thin", color: { argb: typeStyle.border } } };
+    });
+    return sheet;
+  }
+
+  async function downloadSemesterWorkbook(button) {
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.textContent = "Preparing Excel…";
+    clearGlobalMessage();
+    try {
+      const ExcelJS = await loadExcelJs();
+      const semester = currentSemester();
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Weekform";
+      workbook.subject = "Semester routine";
+      const conflictedMeetings = new Set();
+      const conflictedMeetingDays = new Set();
+      findConflicts(semester).forEach(function (conflict) {
+        conflictedMeetings.add(conflictKey(conflict.first.courseId, conflict.first.meetingId));
+        conflictedMeetings.add(conflictKey(conflict.second.courseId, conflict.second.meetingId));
+        conflict.days.forEach(function (dayKey) {
+          conflictedMeetingDays.add(conflictDayKey(conflict.first.courseId, conflict.first.meetingId, dayKey));
+          conflictedMeetingDays.add(conflictDayKey(conflict.second.courseId, conflict.second.meetingId, dayKey));
+        });
+      });
+      const rows = workbookRows(semester);
+      addScheduleDataSheet(workbook, semester, rows, conflictedMeetingDays);
+      addWeeklyChartSheet(workbook, semester, conflictedMeetings);
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = excelFileName(semester.name);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+      button.textContent = "Downloaded";
+    } catch (error) {
+      showGlobalMessage("Couldn't create the Excel file. Check your internet connection and try again.");
+      button.textContent = "Try again";
+    }
+    window.setTimeout(function () {
+      if (button.isConnected) {
+        button.disabled = false;
+        button.textContent = originalLabel;
+      }
+    }, 1800);
   }
 
   function renderCourses() {
@@ -749,11 +1133,13 @@
       const addButton = event.target.closest("[data-add-course]");
       const editButton = event.target.closest("[data-edit-course]");
       const deleteButton = event.target.closest("[data-delete-course]");
+      const exportButton = event.target.closest("[data-export-excel]");
       const closeButton = event.target.closest("[data-close-dialog]");
       const closeSemester = event.target.closest("[data-close-semester]");
       if (addButton) openCourseDialog(null);
       if (editButton) openCourseDialog(editButton.dataset.editCourse);
       if (deleteButton) removeCourse(deleteButton.dataset.deleteCourse);
+      if (exportButton) downloadSemesterWorkbook(exportButton);
       if (closeButton) closeCourseDialog();
       if (closeSemester) $("#semester-dialog").close();
     });
